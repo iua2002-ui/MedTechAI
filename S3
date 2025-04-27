@@ -1,0 +1,61 @@
+# main.tf
+provider "aws" {
+  region = "us-east-1"
+}
+
+# HIPAA-compliant S3 bucket with security controls
+resource "aws_s3_bucket" "medtech_ai_data" {
+  bucket = "medtech-ai-data-${data.aws_caller_identity.current.account_id}"
+}
+
+# Enable versioning for audit trails
+resource "aws_s3_bucket_versioning" "versioning" {
+  bucket = aws_s3_bucket.medtech_ai_data.id
+  versioning_configuration { status = "Enabled" }
+}
+
+# Block all public access
+resource "aws_s3_bucket_public_access_block" "block_public" {
+  bucket                  = aws_s3_bucket.medtech_ai_data.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# Encrypt data using AWS KMS
+resource "aws_s3_bucket_server_side_encryption_configuration" "encryption" {
+  bucket = aws_s3_bucket.medtech_ai_data.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256" # SSE-S3 (simpler than KMS for this example)
+    }
+  }
+}
+
+# Allow only DMS and EC2 roles to access the bucket
+data "aws_iam_policy_document" "s3_policy" {
+  statement {
+    actions   = ["s3:PutObject"]
+    resources = ["${aws_s3_bucket.medtech_ai_data.arn}/*"]
+    principals {
+      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/dms-role"]
+      type        = "AWS"
+    }
+  }
+  statement {
+    actions   = ["s3:GetObject"]
+    resources = ["${aws_s3_bucket.medtech_ai_data.arn}/*"]
+    principals {
+      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/ai-engineer-role"]
+      type        = "AWS"
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "policy" {
+  bucket = aws_s3_bucket.medtech_ai_data.id
+  policy = data.aws_iam_policy_document.s3_policy.json
+}
+
+data "aws_caller_identity" "current" {}
